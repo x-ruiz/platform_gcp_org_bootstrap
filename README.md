@@ -1,6 +1,6 @@
 # GCP Organization Bootstrap (`platform_gcp_org_bootstrap`)
 
-Generalized OpenTofu Organization-level landing zone foundation for Google Cloud. Manages the Organization Seed project, Cloud KMS-encrypted GCS remote state, an org-wide GitHub OIDC Workload Identity Federation (WIF) pool, declarative multi-tier GCP Folders (`var.folders` + `var.subfolders`), optional per-folder keyless CI/CD identities & GitHub Actions variables, and Organization/Folder-level GCP Organization Policies (`google_org_policy_policy`).
+Generalized OpenTofu Organization-level landing zone foundation for Google Cloud, governed by [Spec 01: GCP Org Bootstrap, Multi-Folder Governance, KMS State & Keyless WIF](./specs/01_gcp_org_bootstrap_and_wif.md). Manages the Organization Seed project, Cloud KMS-encrypted GCS remote state, an org-wide GitHub OIDC Workload Identity Federation (WIF) pool, declarative multi-tier GCP Folders (`var.folders` + `var.subfolders`), optional per-folder keyless CI/CD identities & GitHub Actions variables, and Organization/Folder-level GCP Organization Policies (`google_org_policy_policy`).
 
 > **Scope Boundary:** This repository strictly owns **Org-level and Folder-level foundations**. Workload/environment projects (such as `udp-dev`, `uat`, `prod`), VPCs, and billing budgets live in downstream platform repositories (e.g., `platform_unified_data_gcp/infra/platform` & `infra/envs`).
 
@@ -10,7 +10,6 @@ Generalized OpenTofu Organization-level landing zone foundation for Google Cloud
 - **Declarative Organization & Folder Policies (`org_policies.tf`):** Manage boolean and list-based GCP Organization Policies (`google_org_policy_policy`) at Organization, top-level Folder, and Subfolder scopes (opt-in by default).
 - **Hardened Org Seed & Client-Side Encrypted State (`main.tf`, `encryption.tf`):** Provisions a dedicated Seed GCP project (`auto_create_network = false`, `deletion_policy = "PREVENT"`), versioned GCS state bucket (UBLA + PAP enforced, lifecycle retention, `prevent_destroy = true`), and Cloud KMS KeyRing/CryptoKey (90-day rotation, `prevent_destroy = true`) driving OpenTofu native `gcp_kms` + `aes_gcm` state encryption.
 - **Keyless Per-Folder GitOps WIF (`iam_wif.tf`, `github_actions.tf`):** Shares one org-wide WIF Pool & GitHub OIDC Provider restricted to the exact set of authorized repositories (failing closed when empty). Any folder opting into `ci = { ... }` receives isolated `plan` (read-only + conditional `.tflock`-only GCS lock) and `apply` (branch-gated to `refs/heads/<apply_branch>`) Service Accounts scoped strictly to that folder, plus 7 org-owned GitHub Actions repository variables.
-- **Zero-Downtime Migration Compatibility (`migrations.tf`):** Includes OpenTofu `moved {}` blocks and `removed { destroy = false }` blocks to adopt an existing live `platform_unified_data_gcp/infra/bootstrap` GCS state without destroying the Seed project, Folder, GCS bucket, KMS key, or existing `UDP_GCP_DEV_PROJECT_ID` / `UDP_GCP_BUDGET_ALERT_EMAIL` GitHub variables.
 
 ## Architecture Overview
 
@@ -51,6 +50,8 @@ flowchart TB
 ```text
 platform_gcp_org_bootstrap/
 ├── .github/workflows/ci.yml   # Format, validate, TFLint, Trivy, script & OpenTofu mocked tests
+├── specs/
+│   └── 01_gcp_org_bootstrap_and_wif.md  # Org bootstrap, multi-folder, Org Policies & WIF contract
 ├── scripts/
 │   ├── bootstrap_init.sh      # Automated Org IAM preflight, ADC check, tfvars scaffold & tofu apply
 │   └── test_bootstrap_init.sh # Offline mocked unit tests for bootstrap_init.sh
@@ -61,7 +62,6 @@ platform_gcp_org_bootstrap/
 ├── org_policies.tf            # Org-level, folder-level & subfolder-level google_org_policy_policy
 ├── iam_wif.tf                 # Org WIF Pool/OIDC Provider + per-folder plan/apply SAs & IAM
 ├── github_actions.tf          # 7 org-owned GitHub Actions variables per CI-enabled folder
-├── migrations.tf              # Zero-downtime moved/removed blocks for live single-platform adoption
 ├── backend.tf                 # GCS remote state backend (prefix = "bootstrap")
 ├── encryption.tf              # Enforced OpenTofu gcp_kms + aes_gcm state/plan encryption
 ├── variables.tf               # Typed inputs & regex validation contracts
@@ -113,55 +113,6 @@ For a brand-new GCP Org without an existing remote state bucket yet, temporarily
    tofu init -migrate-state -backend-config="bucket=${STATE_BUCKET}"
    ```
 3. Verify the remote object is encrypted ciphertext (`gcloud storage cat "gs://${STATE_BUCKET}/bootstrap/default.tfstate" | head -c 200`), restore `enforced = true` in `encryption.tf`, remove local `terraform.tfstate*`, and run `tofu plan` to confirm zero diff.
-
-## Adopting Existing Live State (from `platform_unified_data_gcp`)
-
-Moving `.tf` files into a standalone repository does **not** affect your existing GCS state (`prefix = "bootstrap"`). However, generalizing the module from single-folder resources to multi-folder `for_each` maps changed the **OpenTofu resource addresses** recorded in `bootstrap/default.tfstate`:
-
-| Existing state address | New generalized address |
-| :--- | :--- |
-| `google_folder.platform` | `google_folder.folders["unified-data-platform"]` |
-| `google_service_account.tofu_plan` / `tofu_apply` | `google_service_account.folder_plan["unified-data-platform"]` / `folder_apply[...]` |
-| `google_folder_iam_member.plan_folder_roles["<role>"]` | `google_folder_iam_member.folder_plan_roles["unified-data-platform:<role>"]` |
-| `github_actions_variable.udp_gcp["UDP_GCP_*"]` *(7 org vars)* | `github_actions_variable.folder_ci["unified-data-platform:UDP_GCP_*"]` |
-| `github_actions_variable.udp_gcp["UDP_GCP_DEV_PROJECT_ID"]` & `UDP_GCP_BUDGET_ALERT_EMAIL` | Detached via `removed { lifecycle { destroy = false } }` |
-
-Without [`migrations.tf`](./migrations.tf):
-- OpenTofu would treat the renamed addresses as deletions + new creations—attempting to destroy the live folder (blocked by `deletion_protection = true`) and recreate the CI service accounts/IAM bindings.
-- Removing `dev_project_id` and `budget_alert_email` from bootstrap would delete `UDP_GCP_DEV_PROJECT_ID` and `UDP_GCP_BUDGET_ALERT_EMAIL` in GitHub; `removed { destroy = false }` forgets them from bootstrap state without touching GitHub so downstream `platform_unified_data_gcp` workflows keep running uninterrupted.
-
-To adopt your existing GCS `bootstrap` state in-place with **0 to destroy**:
-
-1. Create a local gitignored `terraform.tfvars` modeled on `terraform.tfvars.example` with your existing `org_id`, `billing_account_id`, `seed_project_id`, and:
-   ```hcl
-   github_owner      = "x-ruiz"
-   bootstrap_name    = "unified-data-platform"
-   seed_folder_key   = "unified-data-platform"
-   seed_project_name = "UDP Seed"
-   kms_key_ring_name = "unified-data-platform-tofu-state"
-
-   folders = {
-     unified-data-platform = {
-       display_name = "unified-data-platform"
-       ci = {
-         github_repository    = "x-ruiz/playground-cloud-engineering"
-         plan_sa_account_id   = "sa-tofu-plan"
-         apply_sa_account_id  = "sa-tofu-apply"
-         github_var_prefix    = "UDP_GCP"
-         folder_id_var_suffix = "PLATFORM_FOLDER_ID"
-       }
-     }
-   }
-   ```
-2. Point OpenTofu at your existing GCS state bucket and KMS key:
-   ```bash
-   export TF_VAR_state_kms_key_id="<existing-kms-key-id>"
-   export GITHUB_TOKEN="$(gh auth token)"
-   tofu init -backend-config="bucket=<existing-state-bucket>"
-   tofu plan
-   ```
-3. Confirm `tofu plan` reports **0 to destroy**, clean `moved` transitions into `folders["unified-data-platform"]`, and `removed` (forget-only) for `UDP_GCP_DEV_PROJECT_ID` and `UDP_GCP_BUDGET_ALERT_EMAIL`, then run `tofu apply`.
-4. Once applied, your remote state is permanently rewritten to the new addresses and `migrations.tf` can be safely deleted in a follow-up commit (it is also a harmless no-op on fresh orgs).
 
 ## Adding Folders, Subfolders & Organization Policies
 
