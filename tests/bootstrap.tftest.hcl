@@ -37,11 +37,16 @@ mock_provider "google" {
 }
 
 variables {
-  org_id             = "999888777666"
-  billing_account_id = "01ABCD-23EFGH-45IJKL"
-  github_owner       = "x-ruiz"
-  seed_project_id    = "org-seed-test-001"
-  state_kms_key_id   = "projects/org-seed-test-001/locations/us-central1/keyRings/gcp-org-bootstrap-tofu-state/cryptoKeys/tofu-state-key"
+  org_id                 = "999888777666"
+  billing_account_id     = "01ABCD-23EFGH-45IJKL"
+  github_owner           = "x-ruiz"
+  bootstrap_name         = "gcp-org-bootstrap"
+  kms_key_ring_name      = null
+  seed_project_id        = "org-seed-test-001"
+  seed_project_name      = "Org Bootstrap Seed"
+  seed_folder_key        = null
+  state_kms_key_id       = "projects/org-seed-test-001/locations/us-central1/keyRings/gcp-org-bootstrap-tofu-state/cryptoKeys/tofu-state-key"
+  load_folders_from_yaml = false
 
   folders = {
     unified-data-platform = {
@@ -195,6 +200,22 @@ run "zero_repos_wif_fails_closed" {
   assert {
     condition     = google_iam_workload_identity_pool_provider.github.attribute_condition == "false"
     error_message = "WIF OIDC provider must fail closed when no repositories are authorized."
+  }
+}
+
+run "load_checked_in_folders_yaml_manifests" {
+  command = plan
+
+  variables {
+    load_folders_from_yaml = true
+    folders                = {}
+    subfolders             = {}
+    org_policies           = {}
+  }
+
+  assert {
+    condition     = contains(keys(google_folder.folders), "unified-data-platform") && google_folder.folders["unified-data-platform"].display_name == "unified-data-platform" && google_service_account.folder_plan["unified-data-platform"].account_id == "sa-tofu-plan" && google_service_account.folder_apply["unified-data-platform"].account_id == "sa-tofu-apply" && contains(keys(github_actions_variable.folder_ci), "unified-data-platform:UDP_GCP_PLATFORM_FOLDER_ID")
+    error_message = "Checked-in folders/*.yaml manifests must load cleanly and wire WIF, SAs, and GitHub Actions variables."
   }
 }
 

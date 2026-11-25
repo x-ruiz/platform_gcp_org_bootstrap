@@ -49,12 +49,18 @@ flowchart TB
 
 ```text
 platform_gcp_org_bootstrap/
+├── .agents/skills/
+│   └── folder-onboarding/     # Repo-local Antigravity skill: interactive folder onboarding + PR
 ├── .github/workflows/ci.yml   # Format, validate, TFLint, Trivy, script & OpenTofu mocked tests
+├── folders/                   # Git-tracked declarative folder manifests (one YAML per folder)
+│   └── unified-data-platform.yaml
 ├── specs/
 │   └── 01_gcp_org_bootstrap_and_wif.md  # Org bootstrap, multi-folder, Org Policies & WIF contract
 ├── scripts/
 │   ├── bootstrap_init.sh      # Automated Org IAM preflight, ADC check, tfvars scaffold & tofu apply
-│   └── test_bootstrap_init.sh # Offline mocked unit tests for bootstrap_init.sh
+│   ├── test_bootstrap_init.sh # Offline mocked unit tests for bootstrap_init.sh
+│   ├── onboard_folder.sh      # Interactive/CLI folder onboarding & graduated-repo re-bind + PR helper
+│   └── test_onboard_folder.sh # Offline mocked unit tests for onboard_folder.sh
 ├── tests/
 │   └── bootstrap.tftest.hcl   # Offline mocked OpenTofu unit tests (folders, WIF, policies, validations)
 ├── main.tf                    # Seed project, required APIs, hardened GCS state bucket, Cloud KMS
@@ -114,46 +120,74 @@ For a brand-new GCP Org without an existing remote state bucket yet, temporarily
    ```
 3. Verify the remote object is encrypted ciphertext (`gcloud storage cat "gs://${STATE_BUCKET}/bootstrap/default.tfstate" | head -c 200`), restore `enforced = true` in `encryption.tf`, remove local `terraform.tfstate*`, and run `tofu plan` to confirm zero diff.
 
-## Adding Folders, Subfolders & Organization Policies
+## Onboarding Folders, Updating Graduated Repos & Organization Policies
 
-Add entries to `terraform.tfvars` and apply—no HCL code edits required:
+> **Important — How `ci.github_repository` Works:**
+> `folders/<folder-key>.yaml` files are **Git-tracked** (containing zero secrets or Org/Billing IDs) and loaded automatically by `folders.tf`. When a folder opts into `ci`, its `ci.github_repository` points to the **downstream GitOps repository that deploys into that folder**—not `platform_gcp_org_bootstrap` itself. For example, [`folders/unified-data-platform.yaml`](./folders/unified-data-platform.yaml) currently points to `x-ruiz/playground-cloud-engineering` because `platform_unified_data_gcp` still deploys from there.
+>
+> **Every time you onboard a new GCP Folder OR graduate a downstream project into its own standalone repository**, you MUST add or update its `folders/<folder-key>.yaml` manifest here (and apply after merging) so WIF allowlists the new repository, binds its folder-scoped Plan/Apply SAs, and syncs the 7 org-owned GitHub Actions variables to it.
 
-```hcl
-folders = {
-  data-platform = {
-    display_name = "data-platform"
-    ci = {
-      github_repository = "x-ruiz/platform-data-gcp"
-      github_var_prefix = "DATA_GCP"
-    }
-    org_policies = {
-      "gcp.resourceLocations" = {
-        rules = [{ allowed_values = ["in:us-locations"] }]
-      }
-    }
-  }
+### Option A: Automated Onboarding Script (`scripts/onboard_folder.sh`)
 
-  sandbox = {
-    display_name        = "sandbox"
-    deletion_protection = false
-  }
-}
+```bash
+# Interactive onboarding (prompts for folder key, display name, optional CI repo & prefix)
+./scripts/onboard_folder.sh --open-pr
 
-subfolders = {
-  data-nonprod = {
-    parent_folder_key = "data-platform"
-    display_name      = "nonprod"
-  }
-}
+# Non-interactive: onboard a new platform folder + open a PR
+./scripts/onboard_folder.sh \
+  --non-interactive \
+  --folder-key ai-platform \
+  --display-name "AI Platform" \
+  --github-repo x-ruiz/platform-ai-gcp \
+  --var-prefix AI_GCP \
+  --open-pr
 
-org_policies = {
-  "iam.disableServiceAccountKeyCreation" = {
-    rules = [{ enforce = true }]
-  }
-  "storage.uniformBucketLevelAccess" = {
-    rules = [{ enforce = true }]
-  }
-}
+# Plain folder without CI/WIF bindings
+./scripts/onboard_folder.sh --non-interactive --folder-key sandbox --deletion-protection false --no-ci --open-pr
+
+# Re-bind an existing folder after its downstream project graduates to a standalone repo
+./scripts/onboard_folder.sh \
+  --non-interactive \
+  --update \
+  --folder-key unified-data-platform \
+  --github-repo x-ruiz/platform-unified-data \
+  --open-pr
+```
+
+### Option B: Repo-Local Antigravity Skill (`folder-onboarding`)
+
+Opening this repository in Antigravity automatically exposes the repo-local **[`folder-onboarding`](./.agents/skills/folder-onboarding/SKILL.md)** skill. Ask *"onboard a new GCP folder"* or *"update the repo for unified-data-platform"*—the agent will collect the required inputs, generate/update `folders/<folder-key>.yaml`, run the full local verification suite, and open a PR automatically.
+
+### Option C: Manual YAML Manifest (`folders/<folder-key>.yaml`)
+
+Create a new file under `folders/<folder-key>.yaml` (supports optional `subfolders` and folder-scoped `org_policies` directly inside the same file):
+
+```yaml
+# folders/data-platform.yaml
+display_name: "data-platform"
+deletion_protection: true
+
+ci:
+  github_repository: "x-ruiz/platform-data-gcp"
+  apply_branch: "main"
+  github_var_prefix: "DATA_GCP"
+
+subfolders:
+  data-nonprod:
+    display_name: "nonprod"
+
+org_policies:
+  "gcp.resourceLocations":
+    rules:
+      - allowed_values: ["in:us-locations"]
+```
+
+Org-level policies (`org_policies`) are configured in your local `terraform.tfvars` (see [`terraform.tfvars.example`](./terraform.tfvars.example)). After your folder PR merges to `main`, apply locally as Org Admin:
+
+```bash
+export TF_VAR_state_kms_key_id="<existing-kms-key-id>"
+export GITHUB_TOKEN="$(gh auth token)"
+tofu plan && tofu apply
 ```
 
 ### Synced GitHub Actions Variables (Per CI-Enabled Folder)
@@ -182,5 +216,6 @@ tflint --init --config="$(pwd)/.tflint.hcl"
 tflint --recursive --config="$(pwd)/.tflint.hcl"
 trivy config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs '**/.terraform' --skip-dirs '**/.tofu' .
 bash -n scripts/bootstrap_init.sh && bash scripts/test_bootstrap_init.sh
+bash -n scripts/onboard_folder.sh && bash scripts/test_onboard_folder.sh
 tofu test -verbose
 ```

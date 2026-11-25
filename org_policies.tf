@@ -1,6 +1,6 @@
 locals {
   folder_org_policies = merge([
-    for folder_key, folder in var.folders : {
+    for folder_key, folder in local.effective_folders : {
       for constraint, policy in folder.org_policies :
       "${folder_key}:${constraint}" => {
         folder_key = folder_key
@@ -11,7 +11,7 @@ locals {
   ]...)
 
   subfolder_org_policies = merge([
-    for subfolder_key, subfolder in var.subfolders : {
+    for subfolder_key, subfolder in local.effective_subfolders : {
       for constraint, policy in subfolder.org_policies :
       "${subfolder_key}:${constraint}" => {
         subfolder_key = subfolder_key

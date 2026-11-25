@@ -115,6 +115,12 @@ variable "additional_wif_repositories" {
   }
 }
 
+variable "load_folders_from_yaml" {
+  description = "Load declarative folder manifests from folders/*.yaml (merged with var.folders; var.folders takes precedence on key collision)."
+  type        = bool
+  default     = true
+}
+
 variable "folders" {
   description = "Top-level GCP folders under organizations/<org_id>, each with optional keyless GitHub Actions WIF CI/CD and folder-scoped Organization Policies."
   type = map(object({
