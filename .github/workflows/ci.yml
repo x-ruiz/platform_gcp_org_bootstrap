@@ -1,0 +1,72 @@
+name: CI — Static Checks, Security Scan & Mocked Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: org-bootstrap-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  OPENTOFU_VERSION: "1.13.10"
+  TFLINT_VERSION: "0.66.0"
+
+jobs:
+  verify:
+    name: Format, Validate, TFLint, Trivy & Mocked Unit Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.OPENTOFU_VERSION }}
+
+      - name: Check OpenTofu formatting
+        run: tofu fmt -check -recursive -diff .
+
+      - name: Validate OpenTofu root module
+        run: |
+          set -euo pipefail
+          tofu init -backend=false -input=false
+          tofu validate
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v${{ env.TFLINT_VERSION }}
+
+      - name: Initialize and run TFLint (Google ruleset)
+        run: |
+          tflint --init --config="$(pwd)/.tflint.hcl"
+          tflint --recursive --config="$(pwd)/.tflint.hcl"
+
+      - name: Run Trivy IaC security scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: "config"
+          scan-ref: "."
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+          ignore-unfixed: false
+          skip-dirs: "**/.terraform,**/.tofu"
+          trivyignores: ".trivyignore"
+
+      - name: Run script syntax & mocked preflight tests
+        run: |
+          set -euo pipefail
+          bash -n scripts/bootstrap_init.sh
+          bash scripts/test_bootstrap_init.sh
+
+      - name: Run OpenTofu mocked unit tests
+        run: tofu test -verbose

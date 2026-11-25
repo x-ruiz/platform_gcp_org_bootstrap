@@ -1,10 +1,5 @@
-output "platform_folder_id" {
-  description = "Resource ID of the created Platform Folder (folders/<id>)."
-  value       = google_folder.platform.name
-}
-
 output "seed_project_id" {
-  description = "Created Seed GCP Project ID."
+  description = "Created Org bootstrap Seed GCP Project ID."
   value       = google_project.seed.project_id
 }
 
@@ -19,16 +14,27 @@ output "kms_key_id" {
 }
 
 output "wif_provider_name" {
-  description = "Full WIF provider resource path for google-github-actions/auth."
+  description = "Full org-wide GitHub OIDC WIF provider resource path for google-github-actions/auth."
   value       = google_iam_workload_identity_pool_provider.github.name
 }
 
-output "plan_service_account_email" {
-  description = "Email address of the read-only sa-tofu-plan service account."
-  value       = google_service_account.tofu_plan.email
+output "folder_ids" {
+  description = "Map of top-level folder key to GCP folder resource name (folders/<id>)."
+  value       = { for k, f in google_folder.folders : k => f.name }
 }
 
-output "apply_service_account_email" {
-  description = "Email address of the main-only sa-tofu-apply service account."
-  value       = google_service_account.tofu_apply.email
+output "subfolder_ids" {
+  description = "Map of second-level subfolder key to GCP folder resource name (folders/<id>)."
+  value       = { for k, f in google_folder.subfolders : k => f.name }
+}
+
+output "folder_ci_identities" {
+  description = "Map of CI-enabled folder key to its GitHub repository, plan SA email, and apply SA email."
+  value = {
+    for k, cfg in local.ci_folders : k => {
+      github_repository           = cfg.github_repository
+      plan_service_account_email  = google_service_account.folder_plan[k].email
+      apply_service_account_email = google_service_account.folder_apply[k].email
+    }
+  }
 }

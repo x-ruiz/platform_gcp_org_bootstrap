@@ -22,6 +22,5 @@ provider "google" {
 }
 
 provider "github" {
-  owner = split("/", var.github_repository)[0]
+  owner = var.github_owner
 }
-

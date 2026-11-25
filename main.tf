@@ -1,10 +1,12 @@
 locals {
   mandatory_labels = {
     managed_by  = "opentofu"
-    platform    = var.platform_name
+    platform    = var.bootstrap_name
     environment = "seed"
     cost_center = var.cost_center
   }
+
+  kms_key_ring_name = coalesce(var.kms_key_ring_name, "${var.bootstrap_name}-tofu-state")
 
   bootstrap_apis = toset([
     "cloudresourcemanager.googleapis.com",
@@ -17,6 +19,7 @@ locals {
     "cloudkms.googleapis.com",
     "billingbudgets.googleapis.com",
     "monitoring.googleapis.com",
+    "orgpolicy.googleapis.com",
   ])
 }
 
@@ -24,20 +27,22 @@ resource "random_id" "seed_project_suffix" {
   byte_length = 2
 }
 
-resource "google_folder" "platform" {
-  display_name        = var.platform_name
-  parent              = "organizations/${var.org_id}"
-  deletion_protection = true
-}
-
 resource "google_project" "seed" {
-  name                = "UDP Seed"
+  name                = var.seed_project_name
   project_id          = "${var.seed_project_id}-${random_id.seed_project_suffix.hex}"
-  folder_id           = google_folder.platform.folder_id
+  org_id              = var.seed_folder_key == null ? var.org_id : null
+  folder_id           = var.seed_folder_key != null ? google_folder.folders[var.seed_folder_key].folder_id : null
   billing_account     = var.billing_account_id
   auto_create_network = false
   deletion_policy     = "PREVENT"
   labels              = local.mandatory_labels
+
+  lifecycle {
+    precondition {
+      condition     = var.seed_folder_key == null || contains(keys(var.folders), var.seed_folder_key)
+      error_message = "seed_folder_key must either be null or match a key defined in var.folders."
+    }
+  }
 }
 
 resource "google_project_service" "seed_apis" {
@@ -89,7 +94,7 @@ resource "google_storage_bucket" "state" {
 }
 
 resource "google_kms_key_ring" "state" {
-  name     = "${var.platform_name}-tofu-state"
+  name     = local.kms_key_ring_name
   project  = google_project.seed.project_id
   location = var.region
 

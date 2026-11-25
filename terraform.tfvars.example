@@ -1,9 +1,69 @@
 org_id             = "123456789012"
 billing_account_id = "01ABCD-23EFGH-45IJKL"
-github_repository  = "x-ruiz/playground-cloud-engineering"
-platform_name      = "unified-data-platform"
-seed_project_id    = "udp-seed-xruiz"
-dev_project_id     = "udp-dev-xruiz"
-budget_alert_email = "alerts@example.com"
+github_owner       = "x-ruiz"
+bootstrap_name     = "gcp-org-bootstrap"
+seed_project_id    = "org-seed-xruiz"
+seed_project_name  = "Org Bootstrap Seed"
 region             = "us-central1"
-cost_center        = "engineering-playground"
+cost_center        = "platform-engineering"
+
+# Uncomment when migrating an existing live Seed project & KMS KeyRing from
+# platform_unified_data_gcp/infra/bootstrap without recreating resources:
+# seed_folder_key   = "unified-data-platform"
+# seed_project_name = "UDP Seed"
+# kms_key_ring_name = "unified-data-platform-tofu-state"
+
+folders = {
+  unified-data-platform = {
+    display_name = "unified-data-platform"
+    ci = {
+      github_repository    = "x-ruiz/playground-cloud-engineering"
+      plan_sa_account_id   = "sa-tofu-plan"
+      apply_sa_account_id  = "sa-tofu-apply"
+      github_var_prefix    = "UDP_GCP"
+      folder_id_var_suffix = "PLATFORM_FOLDER_ID"
+    }
+  }
+
+  # Example: Add a new platform folder with its own keyless GitOps CI identities:
+  # ai-platform = {
+  #   display_name = "ai-platform"
+  #   ci = {
+  #     github_repository = "x-ruiz/platform-ai-gcp"
+  #     github_var_prefix = "AI_GCP"
+  #   }
+  # }
+
+  # Example: Plain organizational folder without CI/WIF bindings:
+  # sandbox = {
+  #   display_name        = "sandbox"
+  #   deletion_protection = false
+  # }
+}
+
+# Optional second-level folders nested under keys in `folders`:
+# subfolders = {
+#   data-nonprod = {
+#     parent_folder_key = "unified-data-platform"
+#     display_name      = "nonprod"
+#   }
+# }
+
+# Optional Org-level GCP Organization Policies (opt-in; empty by default):
+# org_policies = {
+#   "iam.disableServiceAccountKeyCreation" = {
+#     rules = [{ enforce = true }]
+#   }
+#   "storage.uniformBucketLevelAccess" = {
+#     rules = [{ enforce = true }]
+#   }
+#   "storage.publicAccessPrevention" = {
+#     rules = [{ enforce = true }]
+#   }
+#   "compute.skipDefaultNetworkCreation" = {
+#     rules = [{ enforce = true }]
+#   }
+#   "gcp.resourceLocations" = {
+#     rules = [{ allowed_values = ["in:us-locations"] }]
+#   }
+# }
