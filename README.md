@@ -114,6 +114,55 @@ For a brand-new GCP Org without an existing remote state bucket yet, temporarily
    ```
 3. Verify the remote object is encrypted ciphertext (`gcloud storage cat "gs://${STATE_BUCKET}/bootstrap/default.tfstate" | head -c 200`), restore `enforced = true` in `encryption.tf`, remove local `terraform.tfstate*`, and run `tofu plan` to confirm zero diff.
 
+## Adopting Existing Live State (from `platform_unified_data_gcp`)
+
+Moving `.tf` files into a standalone repository does **not** affect your existing GCS state (`prefix = "bootstrap"`). However, generalizing the module from single-folder resources to multi-folder `for_each` maps changed the **OpenTofu resource addresses** recorded in `bootstrap/default.tfstate`:
+
+| Existing state address | New generalized address |
+| :--- | :--- |
+| `google_folder.platform` | `google_folder.folders["unified-data-platform"]` |
+| `google_service_account.tofu_plan` / `tofu_apply` | `google_service_account.folder_plan["unified-data-platform"]` / `folder_apply[...]` |
+| `google_folder_iam_member.plan_folder_roles["<role>"]` | `google_folder_iam_member.folder_plan_roles["unified-data-platform:<role>"]` |
+| `github_actions_variable.udp_gcp["UDP_GCP_*"]` *(7 org vars)* | `github_actions_variable.folder_ci["unified-data-platform:UDP_GCP_*"]` |
+| `github_actions_variable.udp_gcp["UDP_GCP_DEV_PROJECT_ID"]` & `UDP_GCP_BUDGET_ALERT_EMAIL` | Detached via `removed { lifecycle { destroy = false } }` |
+
+Without [`migrations.tf`](./migrations.tf):
+- OpenTofu would treat the renamed addresses as deletions + new creations—attempting to destroy the live folder (blocked by `deletion_protection = true`) and recreate the CI service accounts/IAM bindings.
+- Removing `dev_project_id` and `budget_alert_email` from bootstrap would delete `UDP_GCP_DEV_PROJECT_ID` and `UDP_GCP_BUDGET_ALERT_EMAIL` in GitHub; `removed { destroy = false }` forgets them from bootstrap state without touching GitHub so downstream `platform_unified_data_gcp` workflows keep running uninterrupted.
+
+To adopt your existing GCS `bootstrap` state in-place with **0 to destroy**:
+
+1. Create a local gitignored `terraform.tfvars` modeled on `terraform.tfvars.example` with your existing `org_id`, `billing_account_id`, `seed_project_id`, and:
+   ```hcl
+   github_owner      = "x-ruiz"
+   bootstrap_name    = "unified-data-platform"
+   seed_folder_key   = "unified-data-platform"
+   seed_project_name = "UDP Seed"
+   kms_key_ring_name = "unified-data-platform-tofu-state"
+
+   folders = {
+     unified-data-platform = {
+       display_name = "unified-data-platform"
+       ci = {
+         github_repository    = "x-ruiz/playground-cloud-engineering"
+         plan_sa_account_id   = "sa-tofu-plan"
+         apply_sa_account_id  = "sa-tofu-apply"
+         github_var_prefix    = "UDP_GCP"
+         folder_id_var_suffix = "PLATFORM_FOLDER_ID"
+       }
+     }
+   }
+   ```
+2. Point OpenTofu at your existing GCS state bucket and KMS key:
+   ```bash
+   export TF_VAR_state_kms_key_id="<existing-kms-key-id>"
+   export GITHUB_TOKEN="$(gh auth token)"
+   tofu init -backend-config="bucket=<existing-state-bucket>"
+   tofu plan
+   ```
+3. Confirm `tofu plan` reports **0 to destroy**, clean `moved` transitions into `folders["unified-data-platform"]`, and `removed` (forget-only) for `UDP_GCP_DEV_PROJECT_ID` and `UDP_GCP_BUDGET_ALERT_EMAIL`, then run `tofu apply`.
+4. Once applied, your remote state is permanently rewritten to the new addresses and `migrations.tf` can be safely deleted in a follow-up commit (it is also a harmless no-op on fresh orgs).
+
 ## Adding Folders, Subfolders & Organization Policies
 
 Add entries to `terraform.tfvars` and apply—no HCL code edits required:
