@@ -62,11 +62,13 @@ jobs:
           skip-dirs: "**/.terraform,**/.tofu"
           trivyignores: ".trivyignore"
 
-      - name: Run script syntax & mocked preflight tests
+      - name: Run script syntax & mocked unit tests
         run: |
           set -euo pipefail
           bash -n scripts/bootstrap_init.sh
+          bash -n scripts/onboard_folder.sh
           bash scripts/test_bootstrap_init.sh
+          bash scripts/test_onboard_folder.sh
 
       - name: Run OpenTofu mocked unit tests
         run: tofu test -verbose

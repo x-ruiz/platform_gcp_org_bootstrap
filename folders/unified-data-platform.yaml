@@ -1,0 +1,19 @@
+# Managed via scripts/onboard_folder.sh or the local `folder-onboarding` Antigravity skill.
+# Declares the `unified-data-platform` GCP Folder and binds its keyless GitHub Actions WIF
+# identities to the downstream repository that deploys into this folder.
+#
+# When `platform_unified_data_gcp` graduates out of `playground-cloud-engineering`, update
+# `ci.github_repository` below (via `./scripts/onboard_folder.sh --update ...`) and apply.
+
+display_name: "unified-data-platform"
+deletion_protection: true
+
+ci:
+  github_repository: "x-ruiz/playground-cloud-engineering"
+  apply_branch: "main"
+  plan_sa_account_id: "sa-tofu-plan"
+  apply_sa_account_id: "sa-tofu-apply"
+  github_var_prefix: "UDP_GCP"
+  folder_id_var_suffix: "PLATFORM_FOLDER_ID"
+  grant_billing_access: true
+  sync_github_vars: true

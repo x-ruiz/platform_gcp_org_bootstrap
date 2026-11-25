@@ -39,8 +39,8 @@ resource "google_project" "seed" {
 
   lifecycle {
     precondition {
-      condition     = var.seed_folder_key == null || contains(keys(var.folders), var.seed_folder_key)
-      error_message = "seed_folder_key must either be null or match a key defined in var.folders."
+      condition     = var.seed_folder_key == null || contains(keys(local.effective_folders), var.seed_folder_key)
+      error_message = "seed_folder_key must either be null or match a key defined in folders/*.yaml or var.folders."
     }
   }
 }

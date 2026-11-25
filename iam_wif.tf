@@ -19,7 +19,7 @@ locals {
   ])
 
   ci_folders = {
-    for k, f in var.folders : k => {
+    for k, f in local.effective_folders : k => {
       display_name         = f.display_name
       github_repository    = f.ci.github_repository
       apply_branch         = f.ci.apply_branch
