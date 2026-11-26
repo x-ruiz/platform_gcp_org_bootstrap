@@ -14,35 +14,54 @@ Generalized OpenTofu Organization-level landing zone foundation for Google Cloud
 ## Architecture Overview
 
 ```mermaid
+%%{init: {"theme": "base", "themeCSS": "svg { background-color: #09090B !important; border-radius: 8px; }", "themeVariables": {"darkMode": true, "background": "#09090B", "mainBkg": "#18181B", "textColor": "#F4F4F5", "primaryColor": "#18181B", "primaryTextColor": "#F4F4F5", "primaryBorderColor": "#7C3AED", "lineColor": "#A855F7", "secondaryColor": "#16141F", "tertiaryColor": "#0F0F14", "edgeLabelBackground": "#18181B", "clusterBkg": "#0F0F14", "clusterBorder": "#52525B", "titleColor": "#D8B4FE", "fontFamily": "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif", "fontSize": "13px"}, "flowchart": {"curve": "basis", "nodeSpacing": 42, "rankSpacing": 56, "padding": 14}}}%%
 flowchart TB
-    Org["GCP Organization (organizations/org_id)"]
-    OrgPol["Org Policies (google_org_policy_policy.org)"]
-    Seed["Seed Project (org-seed-xxxx)"]
-    State["GCS State Bucket + Cloud KMS Key (gcp_kms + aes_gcm)"]
-    WIF["Org WIF Pool + GitHub OIDC Provider (allowlisted repos)"]
-
-    subgraph Folders["Declarative Folder Hierarchy (var.folders / var.subfolders)"]
-        F1["Folder A (e.g., unified-data-platform)\n+ Optional Folder Org Policies"]
-        F2["Folder B (e.g., ai-platform)\n+ Optional Subfolders & Org Policies"]
-        F3["Plain Folder (e.g., sandbox)\n(ci = null)"]
+    subgraph OrgRoot["1. Organization Root & Seed Foundation"]
+        Org["GCP Organization\norganizations/org_id\nRoot Governance Boundary"]
+        OrgPol["Org Policies\ngoogle_org_policy_policy.org\nOpt-In Org Guardrails"]
+        Seed["Seed Project\norg-seed-xxxx\nNo Default VPC · PREVENT Delete"]
+        State[("GCS State Bucket + Cloud KMS\ngcp_kms + aes_gcm Encryption\nUBLA · PAP · 90d Key Rotation")]
+        WIF["Org WIF Pool + GitHub OIDC\nAllowlisted Repos Only\nFail-Closed When Empty"]
     end
 
-    subgraph CI["Optional Per-Folder Keyless CI/CD"]
-        SA1["sa-tofu-plan (PR read-only)\nsa-tofu-apply (refs/heads/main)\n+ 7 GitHub Actions Vars"]
-        SA2["sa-ai-platform-plan / apply\n+ 7 GitHub Actions Vars"]
+    subgraph Folders["2. Declarative Folder Hierarchy (var.folders / var.subfolders)"]
+        F1["Folder A: unified-data-platform\nfolders/unified-data-platform.yaml\nOptional Folder Org Policies"]
+        F2["Folder B: ai-platform\nTop-Level + Subfolders\nOptional Folder Org Policies"]
+        F3["Plain Folder: sandbox\nci = null · No WIF Bindings\nIsolated Non-CI Scope"]
     end
 
-    Org --> OrgPol
-    Org --> Seed
-    Org --> F1
-    Org --> F2
-    Org --> F3
-    Seed --> State
-    Seed --> WIF
-    WIF --> SA1
-    WIF --> SA2
+    subgraph CI["3. Optional Per-Folder Keyless CI/CD"]
+        SA1["sa-tofu-plan · PR Read-Only\nsa-tofu-apply · refs/heads/main\n+ 7 GitHub Actions Vars"]
+        SA2["sa-ai-platform-plan / apply\nBranch-Gated OIDC Identities\n+ 7 GitHub Actions Vars"]
+    end
+
+    Org -.->|"enforces"| OrgPol
+    Org ==>|"hosts seed"| Seed
+    Org -->|"parents"| F1
+    Org -->|"parents"| F2
+    Org -->|"parents"| F3
+    Seed ==>|"encrypted remote state"| State
+    Seed ==>|"hosts federation"| WIF
+    WIF ==>|"OIDC token exchange"| SA1
+    WIF ==>|"OIDC token exchange"| SA2
     SA1 -->|"Folder-scoped IAM"| F1
     SA2 -->|"Folder-scoped IAM"| F2
+
+    classDef core fill:#2E1065,stroke:#A855F7,stroke-width:2px,color:#F5F3FF
+    classDef service fill:#18181B,stroke:#7C3AED,stroke-width:1.5px,color:#F4F4F5
+    classDef store fill:#09090B,stroke:#C084FC,stroke-width:1.5px,color:#EDE9FE
+    classDef async fill:#1E1B2E,stroke:#6B7280,stroke-width:1.25px,stroke-dasharray:4 3,color:#D4D4D8
+    classDef guard fill:#3B0764,stroke:#E879F9,stroke-width:2px,stroke-dasharray:5 3,color:#FAF5FF
+
+    class Org,Seed core
+    class State store
+    class OrgPol,WIF guard
+    class F1,F2,SA1,SA2 service
+    class F3 async
+
+    style OrgRoot fill:#0F0F14,stroke:#52525B,stroke-width:1.5px,color:#D8B4FE
+    style Folders fill:#16141F,stroke:#6D28D9,stroke-width:1.25px,stroke-dasharray:4 3,color:#C4B5FD
+    style CI fill:#0F0F14,stroke:#52525B,stroke-width:1.5px,color:#D8B4FE
 ```
 
 ## Repository Layout
