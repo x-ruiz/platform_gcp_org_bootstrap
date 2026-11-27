@@ -2,6 +2,10 @@ locals {
   default_plan_folder_roles = toset([
     "roles/viewer",
     "roles/iam.securityReviewer",
+    # serviceusage.services.use only: lets the read-only plan SA bill API quota to the env projects
+    # it inspects (downstream providers set user_project_override = true). Cannot enable or
+    # disable services, so the plan SA stays read-only.
+    "roles/serviceusage.serviceUsageConsumer",
   ])
 
   default_apply_folder_roles = toset([

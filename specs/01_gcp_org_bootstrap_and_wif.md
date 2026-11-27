@@ -57,7 +57,7 @@ flowchart TB
     GHRepo ==>|"OIDC JWT"| WIFPool
     WIFPool -->|"repo match"| PlanSA
     WIFPool ==>|"repo + apply_branch"| ApplySA
-    PlanSA -.->|"viewer + securityReviewer"| Folders
+    PlanSA -.->|"viewer + securityReviewer\n+ serviceUsageConsumer"| Folders
     ApplySA ==>|"folder-scoped apply"| Folders
     SeedProj -.->|"syncs 7 repo vars"| GHRepo
 
@@ -230,7 +230,7 @@ Managed via `github_actions_variable` when `sync_github_vars = true`:
 
 | Principal & WIF Condition | Scope | Assigned Roles | Purpose |
 | :--- | :--- | :--- | :--- |
-| `folder_plan[k]` (`assertion.repository == ci.github_repository`) | Target Folder `k` | `roles/viewer`, `roles/iam.securityReviewer` (configurable) | Read-only PR plan & drift detection |
+| `folder_plan[k]` (`assertion.repository == ci.github_repository`) | Target Folder `k` | `roles/viewer`, `roles/iam.securityReviewer`, `roles/serviceusage.serviceUsageConsumer` (configurable) | Read-only PR plan & drift detection; `serviceUsageConsumer` grants only `serviceusage.services.use` so plans can bill API quota to the env project they read (downstream providers set `user_project_override = true`) |
 | `folder_plan[k]` (same repo condition) | Seed State Bucket & KMS | `roles/storage.objectViewer`, conditional `.tflock`-only `objectUser`, `cloudkms.cryptoKeyEncrypterDecrypter` | Read-only encrypted state init + `.tflock` handling |
 | `folder_apply[k]` (`assertion.repository_ref == <repo>:refs/heads/<apply_branch>`) | Target Folder `k` | `projectCreator`, `projectDeleter`, `projectIamAdmin`, `compute.networkAdmin`, `serviceUsageAdmin`, `monitoring.notificationChannelEditor` (configurable) | Provision environment projects & core infra inside folder `k` only |
 | `folder_apply[k]` (same branch condition) | Billing, State Bucket & KMS | Optional `billing.user`/`billing.costsManager`, `storage.objectUser`, `cloudkms.cryptoKeyEncrypterDecrypter` | Link projects, manage budgets & write encrypted state |
