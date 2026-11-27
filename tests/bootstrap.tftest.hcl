@@ -144,6 +144,11 @@ run "multi_folder_hardening_and_org_policies" {
   }
 
   assert {
+    condition     = google_folder_iam_member.folder_plan_roles["unified-data-platform:roles/serviceusage.serviceUsageConsumer"].role == "roles/serviceusage.serviceUsageConsumer" && google_folder_iam_member.folder_plan_roles["ai-platform:roles/serviceusage.serviceUsageConsumer"].role == "roles/serviceusage.serviceUsageConsumer" && length([for k in keys(google_folder_iam_member.folder_plan_roles) : k if startswith(k, "unified-data-platform:")]) == 3
+    error_message = "Every plan SA must hold read-only folder roles viewer, securityReviewer, and serviceUsageConsumer (serviceusage.services.use for user_project_override)."
+  }
+
+  assert {
     condition     = length(github_actions_variable.folder_ci) == 14 && contains(keys(github_actions_variable.folder_ci), "unified-data-platform:UDP_GCP_PLATFORM_FOLDER_ID") && contains(keys(github_actions_variable.folder_ci), "ai-platform:AI_GCP_FOLDER_ID") && !contains(keys(github_actions_variable.folder_ci), "unified-data-platform:UDP_GCP_DEV_PROJECT_ID") && !contains(keys(github_actions_variable.folder_ci), "unified-data-platform:UDP_GCP_BUDGET_ALERT_EMAIL")
     error_message = "Org bootstrap must sync 7 org-owned vars per CI folder and never manage platform dev_project_id or budget_alert_email."
   }
